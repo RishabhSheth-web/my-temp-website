@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dual-axis solar tracker: virtual prototype</title>
+<style>
+:root{--bg:#eef1f4;--card:#fff;--ink:#14202b;--mute:#5b6b7a;--line:#cfd8e0;--sun:#d98e04;--pan:#2b5c8a;--ok:#1f8a5b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1720;--card:#17222d;--ink:#e6edf3;--mute:#92a3b3;--line:#2a3b4a;--sun:#f2b134;--pan:#6fa8dc;--ok:#47c78f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f1720;--card:#17222d;--ink:#e6edf3;--mute:#92a3b3;--line:#2a3b4a;--sun:#f2b134;--pan:#6fa8dc;--ok:#47c78f;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:20px 16px 48px}
+h1{font:600 clamp(26px,5vw,38px)/1.15 Georgia,"Iowan Old Style",serif;margin:0 0 6px}
+p.sub{color:var(--mute);margin:0 0 18px;max-width:62ch}
+nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+nav button{font:inherit;padding:8px 14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;cursor:pointer}
+nav button[aria-selected="true"]{background:var(--pan);color:#fff;border-color:var(--pan)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--sun);outline-offset:2px}
+section{display:none}section.on{display:block}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.box h2{font:600 17px Georgia,serif;margin:0 0 8px}
+canvas{width:100%;height:auto;display:block}
+label{display:block;font-size:14px;color:var(--mute);margin-top:8px}
+input[type=range]{width:100%}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.row button{font:inherit;padding:7px 12px;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;cursor:pointer}
+.row button.act{background:var(--sun);color:#14202b;border-color:var(--sun)}
+.ldr{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+.ldr div{border:1px solid var(--line);border-radius:6px;padding:8px;text-align:center;font:600 15px ui-monospace,Menlo,monospace}
+.ldr small{display:block;font:12px system-ui;color:var(--mute)}
+.stat{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:5px 0;font-size:15px}
+.stat b{font-variant-numeric:tabular-nums}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font:13px/1.5 ui-monospace,Menlo,monospace;margin:8px 0}
+table{border-collapse:collapse;width:100%;font-size:15px}
+td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left}
+.scroll{overflow-x:auto}
+li{margin:4px 0}
+#stage{position:relative;aspect-ratio:16/10;min-height:320px;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#9ccbe8}#stage canvas{width:100%;height:100%;touch-action:none;cursor:grab;display:block}.hint{position:absolute;left:10px;bottom:8px;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:3px 8px;border-radius:6px;pointer-events:none;z-index:1}
+</style></head><body><main>
+<h1>Dual-axis solar tracker: virtual prototype</h1>
+<p class="sub">Part of the Smart Classroom project (ME2324E). Four LDRs, two servos and an ESP32 keep a miniature panel pointed at the sun. The simulator runs the same control logic as the code tab.</p>
+<nav role="tablist">
+<button role="tab" aria-selected="true" data-t="sim">Simulator</button>
+<button role="tab" aria-selected="false" data-t="code">Wokwi code</button>
+<button role="tab" aria-selected="false" data-t="wire">Wiring and parts</button>
+<button role="tab" aria-selected="false" data-t="cad">CAD guide</button>
+</nav>
+
+<section id="sim" class="on">
+<div id="stage"><span class="hint">Drag to orbit, scroll to zoom</span></div>
+<div class="grid" style="margin-top:14px">
+<div class="box"><h2>Sun and controls</h2>
+<label>Azimuth: <b id="vA">40</b>° (0 east, 90 south, 180 west)<input id="sA" type="range" min="0" max="180" value="40"></label>
+<label>Elevation: <b id="vE">35</b>°<input id="sE" type="range" min="5" max="90" value="35"></label>
+<div class="row"><button id="bTrack" class="act">Tracking on</button><button id="bDay">Sweep a day</button><button id="bReset">Reset panel</button></div></div>
+<div class="box"><h2>Live readings</h2>
+<div class="ldr"><div id="tl"><small>Top-left, GPIO 32</small>0</div><div id="tr"><small>Top-right, GPIO 33</small>0</div><div id="bl"><small>Bottom-left, GPIO 34</small>0</div><div id="br"><small>Bottom-right, GPIO 35</small>0</div></div>
+<div class="stat"><span>Yaw servo</span><b id="yaw">90°</b></div>
+<div class="stat"><span>Pitch servo</span><b id="pit">90°</b></div>
+<div class="stat"><span>Tracker output</span><b id="pt">0 W</b></div>
+<div class="stat"><span>Fixed flat panel</span><b id="pf">0 W</b></div>
+<div class="stat"><span>Energy gain over a swept day</span><b id="gain">n/a</b></div></div></div>
+<p class="sub" style="margin-top:14px">The dashed line runs from the sun to the panel centre. Each LDR glows with the light it receives, and the shroud walls cast the shadows that let the controller see which way to turn. Turn tracking off and move the sun to see what a fixed panel loses. The 2 W panel rating is an assumption.</p>
+</section>
+
+<section id="code" class="box">
+<h2>ESP32 firmware (paste into Wokwi sketch.ino)</h2>
+<p>Add <code>ESP32Servo</code> in Wokwi’s libraries.txt. The original suggestion was missing the servo objects, the library and the pin setup, and it read each LDR once without averaging. This version fixes those.</p>
+<pre id="src">#include &lt;ESP32Servo.h&gt;
+
+const int PIN_TL = 32, PIN_TR = 33, PIN_BL = 34, PIN_BR = 35; // ADC1 only (safe with WiFi)
+const int PIN_YAW = 18, PIN_PITCH = 19;
+const int TOLERANCE = 50;       // ADC deadband, about 1.5 degrees
+const int STEP_MS = 20;         // one 1-degree step per loop
+const bool INVERT_LDR = false;  // set true if your LDR module reads LOWER in light
+
+Servo servoYaw, servoPitch;
+int posYaw = 90, posPitch = 90;
+
+int readLdr(int pin) {
+  long sum = 0;
+  for (int i = 0; i &lt; 8; i++) sum += analogRead(pin);
+  int v = sum / 8;
+  return INVERT_LDR ? 4095 - v : v;
+}
+
+void updateSolarTracker() {
+  int tl = readLdr(PIN_TL), tr = readLdr(PIN_TR);
+  int bl = readLdr(PIN_BL), br = readLdr(PIN_BR);
+
+  int avgTop = (tl + tr) / 2,  avgBottom = (bl + br) / 2;
+  int avgLeft = (tl + bl) / 2, avgRight = (tr + br) / 2;
+
+  if (abs(avgTop - avgBottom) &gt; TOLERANCE) {
+    posPitch += (avgTop &gt; avgBottom) ? 1 : -1;
+    posPitch = constrain(posPitch, 0, 180);
+    servoPitch.write(posPitch);
+  }
+  if (abs(avgLeft - avgRight) &gt; TOLERANCE) {
+    posYaw += (avgRight &gt; avgLeft) ? 1 : -1;
+    posYaw = constrain(posYaw, 0, 180);
+    servoYaw.write(posYaw);
+  }
+  Serial.printf("TL %d TR %d BL %d BR %d | yaw %d pitch %d\n",
+                tl, tr, bl, br, posYaw, posPitch);
+}
+
+void setup() {
+  Serial.begin(115200);
+  servoYaw.setPeriodHertz(50);
+  servoPitch.setPeriodHertz(50);
+  servoYaw.attach(PIN_YAW, 500, 2400);
+  servoPitch.attach(PIN_PITCH, 500, 2400);
+  servoYaw.write(posYaw);
+  servoPitch.write(posPitch);
+}
+
+void loop() {
+  updateSolarTracker();
+  delay(STEP_MS);
+}</pre>
+<p>If the panel turns away from the light in Wokwi, set <code>INVERT_LDR</code> to true. For the integrated project, call <code>updateSolarTracker()</code> from the central ESP32 loop (Suryajith’s code) without any blocking <code>delay()</code>: use a <code>millis()</code> timer instead.</p>
+</section>
+
+<section id="wire" class="box">
+<h2>Wiring</h2>
+<div class="scroll"><table>
+<tr><th>Part</th><th>Connects to</th><th>Note</th></tr>
+<tr><td>LDR top-left</td><td>GPIO 32</td><td>3V3 → LDR → node → 10 kΩ → GND; node to pin</td></tr>
+<tr><td>LDR top-right</td><td>GPIO 33</td><td>same divider</td></tr>
+<tr><td>LDR bottom-left</td><td>GPIO 34</td><td>input-only pin, fine for ADC</td></tr>
+<tr><td>LDR bottom-right</td><td>GPIO 35</td><td>input-only pin, fine for ADC</td></tr>
+<tr><td>Yaw servo signal</td><td>GPIO 18</td><td>power from 5 V rail</td></tr>
+<tr><td>Pitch servo signal</td><td>GPIO 19</td><td>power from 5 V rail</td></tr>
+<tr><td>Servo 5 V and GND</td><td>Boost converter output</td><td>join its GND to ESP32 GND</td></tr>
+</table></div>
+<h2 style="margin-top:16px">Panel and battery setup</h2>
+<ul>
+<li>6 V, 1 to 2 W mini solar panel → TP4056 charger module with protection → 1× 18650 cell.</li>
+<li>Battery → MT3608 boost set to 5 V → both servos and the ESP32 VIN. Add a 470 µF capacitor across the servo rail to absorb start-up spikes.</li>
+<li>For the monitoring subsystem (Samrudh), the INA219 sits in series on the panel-to-charger line.</li>
+<li>Use MG90S or SG90 servos; both are fine for a panel under 100 g.</li>
+</ul>
+<p>In Wokwi, use the ESP32 DevKit, 4 photoresistor modules (or LDR plus 10 kΩ), 2 servos and a 5 V source, with all grounds shared.</p>
+</section>
+
+<section id="cad" class="box">
+<h2>CAD modelling steps (Fusion 360 or SolidWorks)</h2>
+<ol>
+<li><b>Base:</b> 100 × 100 × 15 mm plate with a pocket for the yaw servo (SG90 body 23 × 12.5 mm) and four mounting holes.</li>
+<li><b>Turntable:</b> circular disc, 60 mm diameter, fixed to the yaw servo horn.</li>
+<li><b>Pitch bracket:</b> U-bracket on the disc with a pocket for the pitch servo on one arm and a bearing hole on the other, so the panel axle is supported at both ends.</li>
+<li><b>Panel bed:</b> 120 × 70 mm frame, 3 mm thick, with a cut-out matching the panel and the axle attached to the pitch servo horn.</li>
+<li><b>LDR shroud:</b> a cross of 3 mm walls, 15 mm tall, splitting a 40 × 40 mm square into four quadrants, each with a 5 mm LDR hole. Mount it flat on the panel face.</li>
+<li><b>Motion study:</b> add revolute joints, yaw 0 to 180° and pitch 0 to 180°. Check that the panel clears the bracket at 0° and 180°, and leave 40 mm of slack in the cable loop through the turntable.</li>
+<li><b>Export:</b> render an exploded view and an assembly animation for the report.</li>
+</ol>
+</section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id),R=Math.PI/180,PMAX=2;
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+ document.querySelectorAll('nav button').forEach(x=>x.setAttribute('aria-selected',x===b));
+ document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===b.dataset.t));});
+(function(){
+const stage=$('stage');
+if(!window.THREE){stage.insertAdjacentHTML('afterbegin','<p style="padding:20px;color:#14202b">The 3D view could not load. Check your connection and reload.</p>');return}
+let A=40,E=35,yaw=90,pit=90,vyaw=90,vpit=90,track=true,day=false,tDay=0,eT=0,eF=0,hasDay=false,acc=0;
+const sA=$('sA'),sE=$('sE');
+sA.oninput=()=>{A=+sA.value;day=false;$('bDay').classList.remove('act')};
+sE.oninput=()=>{E=+sE.value;day=false;$('bDay').classList.remove('act')};
+$('bTrack').onclick=e=>{track=!track;e.target.textContent=track?'Tracking on':'Tracking off';e.target.classList.toggle('act',track)};
+$('bDay').onclick=e=>{day=!day;tDay=0;eT=eF=0;hasDay=false;e.target.classList.toggle('act',day)};
+$('bReset').onclick=()=>{yaw=90;pit=90};
+
+/* renderer and scene */
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputEncoding=THREE.sRGBEncoding;renderer.toneMapping=THREE.ACESFilmicToneMapping;
+stage.appendChild(renderer.domElement);const cv=renderer.domElement;
+const scene=new THREE.Scene(),cam=new THREE.PerspectiveCamera(40,1.6,.1,100);
+const hemi=new THREE.HemisphereLight(0xcfe3ff,0x6b5a48,.7);scene.add(hemi);
+const sunL=new THREE.DirectionalLight(0xfff0d0,2.4);sunL.castShadow=true;sunL.shadow.mapSize.set(2048,2048);
+const sc=sunL.shadow.camera;sc.left=-3;sc.right=3;sc.top=3;sc.bottom=-3;sc.near=.5;sc.far=20;sunL.shadow.bias=-.0006;
+scene.add(sunL,sunL.target);
+const M=(c,r=.6,m=0)=>new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m});
+const sh=m=>{m.castShadow=m.receiveShadow=true;return m};
+const box=(w,h,d,mat,x,y,z,p)=>{const m=sh(new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat));m.position.set(x,y,z);(p||scene).add(m);return m};
+const cyl=(r,h,mat,x,y,z,p,ax)=>{const m=sh(new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,32),mat));m.position.set(x,y,z);if(ax==='z')m.rotation.x=Math.PI/2;if(ax==='x')m.rotation.z=Math.PI/2;(p||scene).add(m);return m};
+const cnv=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c};
+const tex=c=>{const t=new THREE.CanvasTexture(c);t.encoding=THREE.sRGBEncoding;t.anisotropy=8;return t};
+
+/* wooden bench */
+const wc=cnv(512,512),wg=wc.getContext('2d');wg.fillStyle='#a77b4f';wg.fillRect(0,0,512,512);
+for(let i=0;i<260;i++){wg.strokeStyle='rgba('+(60+Math.random()*50|0)+',40,20,'+(.05+Math.random()*.12)+')';wg.lineWidth=1+Math.random()*2;wg.beginPath();const y=Math.random()*512;wg.moveTo(0,y);wg.bezierCurveTo(170,y+Math.random()*8-4,340,y+Math.random()*8-4,512,y);wg.stroke()}
+box(9,.2,6,new THREE.MeshStandardMaterial({map:tex(wc),roughness:.7}),0,-.1,0);
+
+/* servo: shaft points up, boss on top */
+function servo(){const g=new THREE.Group(),b=M(0x2f6fd0,.45);
+ box(.23,.22,.12,b,0,0,0,g);box(.33,.018,.12,b,0,.07,0,g);box(.2,.04,.1,M(0x244f96,.5),0,.12,0,g);
+ cyl(.028,.03,M(0xdddddd,.35,.5),.05,.145,0,g);
+ [-.14,.14].forEach(x=>cyl(.012,.02,M(0x9aa3ab,.3,.8),x,.075,0,g,null));
+ cyl(.006,.3,M(0x3a2a22,.8),-.115,-.04,0,g,'x');return g}
+
+/* base plate, yaw servo, turntable */
+const acrylic=M(0xe3e7eb,.25);acrylic.transparent=true;acrylic.opacity=.92;
+box(1.5,.06,1.5,acrylic,0,.03,0);
+[[-.68,-.68],[.68,-.68],[-.68,.68],[.68,.68]].forEach(p=>cyl(.025,.07,M(0x888f96,.3,.8),p[0],.085,p[1]));
+const ys=servo();ys.position.set(-.05,.17,0);scene.add(ys);
+const yawG=new THREE.Group();yawG.position.set(0,.31,0);scene.add(yawG);
+const pla=M(0x23272c,.75);
+cyl(.52,.04,M(0xf2f2f2,.4),0,-.02,0,yawG);
+[-1,1].forEach(s=>{box(.5,.9,.04,pla,0,.45,s*.46,yawG);cyl(.045,.05,M(0x9aa3ab,.3,.8),0,.9,s*.49,yawG,'z')});
+box(1,.03,.5,pla,0,.015,0,yawG);
+const ps=servo();ps.position.set(-.05,.9,.59);ps.rotation.x=Math.PI/2;yawG.add(ps);
+const pitG=new THREE.Group();pitG.position.set(0,.9,0);yawG.add(pitG);
+
+/* solar panel, axle, horn */
+cyl(.02,1.28,M(0xc0c6cc,.25,.9),0,0,.12,pitG,'z');
+box(.16,.03,.012,M(0xf4f4f4,.4),0,0,.735,pitG);
+box(1.34,.045,.74,M(0xaab2ba,.35,.8),0,0,0,pitG);
+const pc=cnv(512,280),pg=pc.getContext('2d');pg.fillStyle='#b9c2cc';pg.fillRect(0,0,512,280);
+for(let i=0;i<6;i++)for(let j=0;j<3;j++){const cw=512/6,ch=280/3,x=i*cw+5,y=j*ch+5,w=cw-10,h=ch-10;
+ const gr=pg.createLinearGradient(x,y,x+w,y+h);gr.addColorStop(0,'#1a3d78');gr.addColorStop(1,'#0b2149');pg.fillStyle=gr;pg.fillRect(x,y,w,h);
+ pg.strokeStyle='rgba(205,215,225,.85)';pg.lineWidth=2;for(let k=1;k<3;k++){pg.beginPath();pg.moveTo(x+w*k/3,y);pg.lineTo(x+w*k/3,y+h);pg.stroke()}
+ pg.lineWidth=.6;pg.strokeStyle='rgba(170,190,215,.22)';for(let k=1;k<14;k++){pg.beginPath();pg.moveTo(x,y+h*k/14);pg.lineTo(x+w,y+h*k/14);pg.stroke()}}
+const face=new THREE.Mesh(new THREE.PlaneGeometry(1.26,.66),new THREE.MeshStandardMaterial({map:tex(pc),roughness:.22,metalness:.25}));
+face.rotation.x=-Math.PI/2;face.position.y=.0235;face.receiveShadow=true;pitG.add(face);
+
+/* LDR shroud: outer walls plus a cross, one LDR per quadrant */
+const wall=M(0x15181c,.9),H=.12,Y=.0235+H/2;
+[-1,1].forEach(s=>{box(.372,H,.012,wall,0,Y,s*.18,pitG);box(.012,H,.372,wall,s*.18,Y,0,pitG)});
+box(.36,H,.012,wall,0,Y,0,pitG);box(.012,H,.36,wall,0,Y,0,pitG);
+const lc=cnv(64,64),lg=lc.getContext('2d');lg.fillStyle='#c9702f';lg.fillRect(0,0,64,64);lg.strokeStyle='#6b3a1a';lg.lineWidth=3;
+lg.beginPath();for(let y=10;y<56;y+=9){lg.moveTo(12,y);lg.lineTo(52,y);lg.lineTo(52,y+4.5);lg.lineTo(12,y+4.5)}lg.stroke();
+const ldrs={};
+[['tl',-1,-1],['tr',-1,1],['bl',1,-1],['br',1,1]].forEach(q=>{
+ const m=new THREE.MeshStandardMaterial({map:tex(lc),roughness:.5,emissive:0xff9a3c,emissiveIntensity:0});
+ const d=sh(new THREE.Mesh(new THREE.CylinderGeometry(.045,.045,.012,32),m));d.position.set(q[1]*.09,.0235+.008,q[2]*.09);pitG.add(d);
+ cyl(.045,.004,M(0xb8b8b8,.3,.8),q[1]*.09,.0235+.016,q[2]*.09,pitG);ldrs[q[0]]=m});
+
+/* electronics: breadboard, ESP32, charger, cell */
+box(1.7,.08,.62,M(0xf1f1ee,.6),-2.4,.04,1.3);
+const dots=cnv(256,64),dg=dots.getContext('2d');dg.fillStyle='#f1f1ee';dg.fillRect(0,0,256,64);dg.fillStyle='#8a8a86';
+for(let x=6;x<256;x+=8)for(let y=6;y<64;y+=8){if(y>26&&y<38)continue;dg.fillRect(x,y,2.5,2.5)}
+const bb=new THREE.Mesh(new THREE.PlaneGeometry(1.66,.58),new THREE.MeshStandardMaterial({map:tex(dots),roughness:.6}));bb.rotation.x=-Math.PI/2;bb.position.set(-2.4,.082,1.3);scene.add(bb);
+box(.58,.03,.28,M(0x14181c,.5),-2.7,.1,1.3);box(.2,.03,.17,M(0xb9c0c6,.25,.9),-2.52,.13,1.3);
+box(.08,.012,.05,M(0xc9a64a,.3,.9),-2.88,.13,1.3);
+const led=new THREE.Mesh(new THREE.BoxGeometry(.03,.02,.03),new THREE.MeshStandardMaterial({color:0x113311,emissive:0x22ff55,emissiveIntensity:1}));led.position.set(-2.82,.12,1.2);scene.add(led);
+box(.32,.02,.2,M(0x1f56b8,.45),-2.0,.1,1.3);box(.1,.025,.07,M(0xdddddd,.3,.8),-1.9,.12,1.3);
+cyl(.09,.65,M(0x2b8a4a,.45),-2.2,.1,1.95,null,'x');cyl(.085,.04,M(0xc9ced3,.3,.9),-1.87,.1,1.95,null,'x');
+[[0xd23a2a,0],[0x222222,.02],[0xe0a21a,.04]].forEach(c=>{const pts=[[.12,.1,.02+c[1]],[-.5,.03,.5],[-1.2,.05,1.0],[-1.7,.1,1.2+c[1]]].map(a=>new THREE.Vector3(...a));
+ const t=sh(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),24,.007,6),M(c[0],.6)));scene.add(t)});
+
+/* sun */
+const sunM=new THREE.Mesh(new THREE.SphereGeometry(.26,32,16),new THREE.MeshBasicMaterial({color:0xfff2b8}));scene.add(sunM);
+const hc=cnv(128,128),hg=hc.getContext('2d'),rg=hg.createRadialGradient(64,64,4,64,64,64);rg.addColorStop(0,'rgba(255,230,150,.95)');rg.addColorStop(1,'rgba(255,200,90,0)');hg.fillStyle=rg;hg.fillRect(0,0,128,128);
+const halo=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(hc),transparent:true,depthWrite:false}));halo.scale.set(2.2,2.2,1);sunM.add(halo);
+const rayG=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
+const ray=new THREE.Line(rayG,new THREE.LineBasicMaterial({color:0xffd36a,transparent:true,opacity:.55}));scene.add(ray);
+
+/* orbit camera */
+let th=.55,ph=1.12,rad=5.4,drag=null;const tgt=new THREE.Vector3(-.3,.75,.2);
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId)});
+cv.addEventListener('pointermove',e=>{if(!drag)return;th-=(e.clientX-drag[0])*.008;ph=Math.max(.25,Math.min(1.5,ph-(e.clientY-drag[1])*.008));drag=[e.clientX,e.clientY]});
+['pointerup','pointercancel'].forEach(n=>cv.addEventListener(n,()=>drag=null));
+cv.addEventListener('wheel',e=>{e.preventDefault();rad=Math.max(2.2,Math.min(9,rad*(1+e.deltaY*.001)))},{passive:false});
+const fit=()=>{const w=stage.clientWidth,h=stage.clientHeight;renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix()};
+new ResizeObserver(fit).observe(stage);fit();
+
+/* physics: same logic as the ESP32 code */
+const dot=(u,v)=>u[0]*v[0]+u[1]*v[1]+u[2]*v[2];
+function vecs(){const a=A*R,e=E*R,y=vyaw*R,p=vpit*R;
+ const s=[Math.cos(e)*Math.cos(a),Math.cos(e)*Math.sin(a),Math.sin(e)];
+ const n=[Math.cos(p)*Math.cos(y),Math.cos(p)*Math.sin(y),Math.sin(p)];
+ const er=[-Math.sin(y),Math.cos(y),0],eu=[-Math.sin(p)*Math.cos(y),-Math.sin(p)*Math.sin(y),Math.cos(p)];
+ return{base:dot(s,n),sr:dot(s,er),su:dot(s,eu)}}
+function ldr(){const v=vecs(),q=(x,y)=>Math.max(0,v.base+.45*(x*v.sr+y*v.su)),f=x=>Math.round(Math.min(4095,4095*.9*x+Math.random()*8));
+ return{tl:f(q(-1,1)),tr:f(q(1,1)),bl:f(q(-1,-1)),br:f(q(1,-1)),v}}
+function step(r){const TOL=50,top=(r.tl+r.tr)>>1,bot=(r.bl+r.br)>>1,left=(r.tl+r.bl)>>1,right=(r.tr+r.br)>>1;
+ if(Math.abs(top-bot)>TOL){pit+=top>bot?1:-1;pit=Math.max(0,Math.min(180,pit))}
+ if(Math.abs(left-right)>TOL){yaw+=right>left?1:-1;yaw=Math.max(0,Math.min(180,yaw))}}
+const sky0=new THREE.Color(0xe8a56c),sky1=new THREE.Color(0x9ccbe8),ctr=new THREE.Vector3(0,1.2,0),pw=new THREE.Vector3();
+let last=performance.now();
+function frame(now){const dt=Math.min(.05,(now-last)/1000);last=now;
+ if(day){tDay+=dt/40;if(tDay>=1){tDay=1;day=false;hasDay=true;$('bDay').classList.remove('act')}
+  A=tDay*180;E=8+78*Math.sin(Math.PI*tDay);sA.value=A;sE.value=E;
+  const v0=vecs();eT+=PMAX*Math.max(0,v0.base)*dt;eF+=PMAX*Math.max(0,Math.sin(E*R))*dt}
+ acc+=dt;let r=null;while(acc>=.02){acc-=.02;r=ldr();if(track)step(r)}
+ const mx=90*dt;vyaw+=Math.max(-mx,Math.min(mx,yaw-vyaw));vpit+=Math.max(-mx,Math.min(mx,pit-vpit));
+ r=ldr();const v=r.v;
+ yawG.rotation.y=-vyaw*R;pitG.rotation.z=(vpit-90)*R;
+ const a=A*R,e=E*R,s=new THREE.Vector3(Math.cos(e)*Math.cos(a),Math.sin(e),Math.cos(e)*Math.sin(a));
+ sunM.position.copy(s).multiplyScalar(6.5).add(ctr);sunL.position.copy(sunM.position);sunL.target.position.copy(ctr);
+ const t=Math.min(1,(E-5)/35);sunL.intensity=.6+2*Math.min(1,E/25);hemi.intensity=.45+.4*t;
+ scene.background=sky0.clone().lerp(sky1,t);
+ pitG.getWorldPosition(pw);const pa=ray.geometry.attributes.position;pa.setXYZ(0,sunM.position.x,sunM.position.y,sunM.position.z);pa.setXYZ(1,pw.x,pw.y,pw.z);pa.needsUpdate=true;
+ for(const k in ldrs)ldrs[k].emissiveIntensity=r[k]/4095*.9;
+ led.material.emissiveIntensity=.3+.7*(Math.sin(now/180)>0);
+ cam.position.set(tgt.x+rad*Math.sin(ph)*Math.sin(th),tgt.y+rad*Math.cos(ph),tgt.z+rad*Math.sin(ph)*Math.cos(th));cam.lookAt(tgt);
+ renderer.render(scene,cam);
+ for(const k of['tl','tr','bl','br'])$(k).lastChild.textContent=r[k];
+ $('vA').textContent=Math.round(A);$('vE').textContent=Math.round(E);
+ $('yaw').textContent=Math.round(vyaw)+'°';$('pit').textContent=Math.round(vpit)+'°';
+ $('pt').textContent=(PMAX*Math.max(0,v.base)).toFixed(2)+' W';
+ $('pf').textContent=(PMAX*Math.max(0,Math.sin(E*R))).toFixed(2)+' W';
+ $('gain').textContent=(day||hasDay)&&eF>0?'+'+((eT/eF-1)*100).toFixed(0)+'%':'run “Sweep a day”';
+ requestAnimationFrame(frame)}
+requestAnimationFrame(frame);
+})();
+</script></body></html>

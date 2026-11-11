@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Lighting Simulator · ME2324E</title>
+<style>
+:root{--navy:#0F1E3D;--cream:#F6F0E2;--gold:#C9A24B;--teal:#2E7D8C;--red:#B5473A;--ink:#1B2438;--line:#E9DDBF;--white:#fff;--muted:#5A5F6B}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--cream);color:var(--ink);font-family:Calibri,"Segoe UI",Arial,sans-serif}
+header{background:var(--navy);color:var(--cream);padding:8px 24px;display:flex;justify-content:space-between;align-items:baseline}
+header h1{margin:0;font:700 20px Cambria,Georgia,serif}
+header span{color:var(--gold);font-size:12px;letter-spacing:.15em;font-weight:700}
+main{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:12px;padding:10px 24px;max-width:1280px;margin:0 auto}
+.card{background:var(--white);border:1px solid var(--line);border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:10px 12px}
+#roomwrap{position:relative}
+svg{display:block;width:100%;height:auto}
+#cap{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);background:rgba(15,30,61,.92);color:var(--cream);padding:8px 16px;border-radius:6px;font-size:17px;font-weight:700;max-width:92%;text-align:center;display:none}
+.big{font:700 44px Cambria,Georgia,serif;color:var(--navy);line-height:1}
+.lbl{font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase}
+.bar{height:12px;background:#ECE6D4;border-radius:6px;overflow:hidden;margin:6px 0 8px}
+.bar>i{display:block;height:100%;background:var(--teal);width:0}
+.row{display:flex;justify-content:space-between;align-items:baseline;margin:3px 0;font-size:15px}
+.row b{font-size:18px;color:var(--navy)}
+.pill{display:inline-block;padding:3px 10px;border-radius:12px;font-weight:700;font-size:14px}
+.on{background:#DCEFE2;color:#1F6B3A}.hold{background:#F9ECC8;color:#8A6A12}.off{background:#EEE;color:#555}
+.seg{display:flex;border:1px solid var(--navy);border-radius:6px;overflow:hidden;margin:4px 0 8px}
+.seg button{flex:1;border:0;background:var(--white);color:var(--navy);padding:6px 4px;font:700 14px Calibri,Arial,sans-serif;cursor:pointer}
+.seg button.act{background:var(--navy);color:var(--cream)}
+.seg button:focus-visible,#play:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--gold);outline-offset:1px}
+input[type=range]{width:100%;accent-color:var(--navy)}
+#play{background:var(--gold);color:var(--navy);border:0;border-radius:6px;padding:9px 18px;font:700 15px Calibri,Arial,sans-serif;cursor:pointer}
+select{padding:7px;border:1px solid var(--navy);border-radius:6px;font:14px Calibri,Arial,sans-serif;background:#fff}
+.note{font-size:12px;color:var(--muted);margin-top:8px}
+.sav{font:700 20px Cambria,Georgia,serif;color:#1F6B3A}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><h1>Smart Lighting Simulator</h1><span>ME2324E · GROUP 10 · HARIPRIYAN K</span></header>
+<main>
+  <section>
+    <div class="card" id="roomwrap">
+      <svg id="room" viewBox="0 0 760 405" role="img" aria-label="Top-down view of the classroom showing LED panel brightness, daylight from the window, occupants, PIR and BH1750 sensors"></svg>
+      <div id="cap"></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="lbl">Scheduled weekday: daylight vs LED brightness</div>
+      <svg id="chart" viewBox="0 0 760 118" role="img" aria-label="Daylight and LED brightness across the day with a time cursor"></svg>
+    </div>
+  </section>
+  <aside>
+    <div class="card">
+      <div class="lbl">Clock</div>
+      <div class="row"><b id="clock" style="font-size:28px">06:00</b>
+        <span><select id="speed" aria-label="Playback speed"><option value="20">Slow</option><option value="60" selected>1 h/s</option><option value="120">Fast</option></select> <button id="play">▶ Play day</button></span></div>
+      <input id="time" type="range" min="360" max="1200" step="1" value="360" aria-label="Time of day">
+      <div class="lbl" style="margin-top:6px">Sky</div>
+      <div class="seg" id="sky"><button data-v="clear" class="act">Clear</button><button data-v="partly">Partly cloudy</button><button data-v="overcast">Overcast</button></div>
+      <div class="lbl">Room</div>
+      <div class="seg" id="mode"><button data-v="auto" class="act">Class schedule</button><button data-v="occ">Occupied</button><button data-v="empty">Empty</button></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="lbl">LED brightness</div>
+      <div class="big"><span id="pct">0</span><span style="font-size:28px"> %</span></div>
+      <div class="bar"><i id="pbar"></i></div>
+      <div class="row"><span>Daylight (BH1750)</span><b><span id="lux">0</span> lx</b></div>
+      <div class="row"><span>Occupancy (PIR)</span><span id="occ" class="pill off">Empty</span></div>
+      <div class="row"><span>Smart power</span><b><span id="pw">0</span> W</b></div>
+      <div class="row"><span>Baseline power</span><b><span id="bw">0</span> W</b></div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:6px 0">
+      <div class="lbl">Energy so far (scheduled day)</div>
+      <div class="row"><span>Smart</span><b><span id="es">0.00</span> kWh</b></div>
+      <div class="row"><span>Baseline</span><b><span id="eb">0.00</span> kWh</b></div>
+      <div class="row"><span>Saving</span><span class="sav" id="esv">0 %</span></div>
+    </div>
+    <details class="note"><summary>Assumptions</summary>Simulated values, not measurements. Rule: LED % = (500 − lux) / 500, limited to 10–100 % while occupied; off 5 min after the last motion. 12 panels × 36 W (assumed). Baseline: lights fully on 08:00–18:00.</details>
+  </aside>
+</main>
+<script>
+(function(){
+  var P_FULL=432, TARGET=500, MINP=10, HOLD=5, T0=360, T1=1200;
+  var SESS=[[540,720],[840,1020]], PEAK={clear:900,partly:650,overcast:250};
+  var S={t:T0,sky:'clear',mode:'auto',playing:false,speed:60,last:-999};
+  var $=function(id){return document.getElementById(id)};
+  var NS='http://www.w3.org/2000/svg';
+  function clamp(v,a,b){return Math.min(b,Math.max(a,v))}
+  function lux(m,sky){var th=m/60,x=clamp((th-6)/12,0,1),b=PEAK[sky]*Math.pow(Math.sin(Math.PI*x),1.3);if(sky==='partly')b*=0.8+0.2*Math.sin(th*3.1);return Math.max(b,0)}
+  function inSess(m){return SESS.some(function(s){return m>=s[0]&&m<s[1]})}
+  function motion(m){return S.mode==='auto'?inSess(m):S.mode==='occ'}
+  function pctFor(l,occ){return occ?clamp(100*Math.max(0,TARGET-l)/TARGET,MINP,100):0}
+  function rescan(){ // recompute last motion after a jump in time or mode
+    if(S.mode==='auto'){S.last=-999;for(var m=T0;m<=Math.floor(S.t);m++){if(inSess(m))S.last=m}}
+    else if(S.mode==='occ'){S.last=S.t}
+    else if(S.last>S.t){S.last=-999}
+  }
+  function energy(){var lm=-999,es=0,eb=0;for(var m=T0;m<Math.floor(S.t);m++){if(inSess(m))lm=m;var o=(m-lm)<HOLD;es+=P_FULL*pctFor(lux(m,S.sky),o)/100/60;if(m>=480&&m<1080)eb+=P_FULL/60}return[es/1000,eb/1000]}
+
+  // ---- build room
+  var room=$('room');
+  function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);(p||room).appendChild(e);return e}
+  var defs=el('defs',{});
+  var f=el('filter',{id:'glow',x:'-60%',y:'-60%',width:'220%',height:'220%'},defs);el('feGaussianBlur',{stdDeviation:'9'},f);
+  var g=el('linearGradient',{id:'sunG',x1:'0',y1:'0',x2:'0',y2:'1'},defs);
+  el('stop',{offset:'0','stop-color':'#FFE9A8','stop-opacity':'0.95'},g);el('stop',{offset:'1','stop-color':'#FFE9A8','stop-opacity':'0'},g);
+  el('rect',{x:20,y:40,width:720,height:340,rx:4,fill:'#E9E2CF',stroke:'#0F1E3D','stroke-width':4});
+  var sun=el('polygon',{points:'130,44 630,44 700,260 60,260',fill:'url(#sunG)',opacity:0});
+  el('rect',{x:120,y:34,width:520,height:12,fill:'#9ED0E6',stroke:'#0F1E3D','stroke-width':2});
+  el('text',{x:380,y:26,'text-anchor':'middle','font-size':13,'font-weight':700,fill:'#0F1E3D'}).textContent='WINDOW (daylight)';
+  var desks=[],ppl=[];
+  for(var r=0;r<3;r++)for(var c=0;c<4;c++){var dx=70+c*165,dy=98+r*95;
+    el('rect',{x:dx+10,y:dy,width:100,height:28,rx:3,fill:'#C9B88F',stroke:'#8A7A52'});
+    ppl.push(el('circle',{cx:dx+60,cy:dy+44,r:11,fill:'#2E7D8C',opacity:0}));}
+  var dark=el('rect',{x:22,y:42,width:716,height:336,fill:'#0A1228',opacity:0,'pointer-events':'none'});
+  var leds=[],halos=[];
+  for(var r2=0;r2<3;r2++)for(var c2=0;c2<4;c2++){var lx=70+c2*165+13,ly=60+r2*95;
+    halos.push(el('rect',{x:lx-8,y:ly-6,width:110,height:42,rx:8,fill:'#FFD65A',opacity:0,filter:'url(#glow)'}));
+    leds.push(el('rect',{x:lx,y:ly,width:94,height:30,rx:4,fill:'#3A4358',stroke:'#0F1E3D','stroke-width':2}));}
+  var ledGlow=[];leds.forEach(function(l){});
+  // sensors
+  var pirRing=el('circle',{cx:700,cy:78,r:20,fill:'none',stroke:'#B5473A','stroke-width':3,opacity:0});
+  el('circle',{cx:700,cy:78,r:9,fill:'#B5473A'});el('text',{x:700,y:114,'text-anchor':'middle','font-size':13,'font-weight':700,fill:'#0F1E3D'}).textContent='PIR';
+  el('circle',{cx:380,cy:222,r:11,fill:'#C9A24B',stroke:'#0F1E3D','stroke-width':2});
+  var bhTxt=el('text',{x:380,y:250,'text-anchor':'middle','font-size':13,'font-weight':700,fill:'#fff'});
+  el('text',{x:24,y:398,'font-size':13,'font-weight':700,fill:'#0F1E3D'}).textContent='12 LED panels · BH1750 at desk level (gold dot)';
+
+  // ---- chart
+  var ch=$('chart'),CX0=40,CX1=740,CY0=26,CY1=92;
+  function cx(m){return CX0+(m-T0)/(T1-T0)*(CX1-CX0)}
+  function cel(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);ch.appendChild(e);return e}
+  var chartDyn=[];
+  function drawChart(){
+    chartDyn.forEach(function(e){ch.removeChild(e)});chartDyn=[];
+    SESS.forEach(function(s){chartDyn.push(cel('rect',{x:cx(s[0]),y:CY0,width:cx(s[1])-cx(s[0]),height:CY1-CY0,fill:'#DDD',opacity:.6}))});
+    var d1='',d2='',lm=-999;
+    for(var m=T0;m<=T1;m+=5){if(inSess(m))lm=m;var l=lux(m,S.sky),p=pctFor(l,(m-lm)<HOLD);
+      var y1=CY1-(l/900)*(CY1-CY0),y2=CY1-(p/100)*(CY1-CY0);d1+=(m===T0?'M':'L')+cx(m)+' '+y1;d2+=(m===T0?'M':'L')+cx(m)+' '+y2}
+    chartDyn.push(cel('path',{d:d1,fill:'none',stroke:'#C9A24B','stroke-width':3}));
+    chartDyn.push(cel('path',{d:d2,fill:'none',stroke:'#2E7D8C','stroke-width':3}));
+    cur=cel('line',{x1:0,x2:0,y1:CY0,y2:CY1,stroke:'#0F1E3D','stroke-width':2});chartDyn.push(cur);
+  }
+  var cur;
+  cel('line',{x1:CX0,x2:CX1,y1:CY1,y2:CY1,stroke:'#555'});
+  for(var h=6;h<=20;h+=2){cel('text',{x:cx(h*60),y:108,'text-anchor':'middle','font-size':11,fill:'#555'}).textContent=(h<10?'0':'')+h+':00'}
+  var lg=cel('text',{x:46,y:18,'font-size':12,'font-weight':700,fill:'#C9A24B'});lg.textContent='Daylight (0–900 lx)';
+  var lg2=cel('text',{x:210,y:18,'font-size':12,'font-weight':700,fill:'#2E7D8C'});lg2.textContent='LED brightness (0–100 %)';
+
+  // ---- render
+  function fmt(m){m=Math.floor(m);var h=Math.floor(m/60),mm=m%60;return(h<10?'0':'')+h+':'+(mm<10?'0':'')+mm}
+  function render(){
+    var l=lux(S.t,S.sky),pres=motion(Math.floor(S.t)),occ=(S.t-S.last)<HOLD;
+    var p=pctFor(l,occ),P=P_FULL*p/100,B=(S.t>=480&&S.t<1080)?P_FULL:0;
+    $('clock').textContent=fmt(S.t);$('time').value=Math.floor(S.t);
+    $('pct').textContent=Math.round(p);$('pbar').style.width=p+'%';$('lux').textContent=Math.round(l);
+    $('pw').textContent=Math.round(P);$('bw').textContent=B;
+    var o=$('occ');
+    if(pres){o.textContent='Occupied';o.className='pill on'}
+    else if(occ){var left=Math.max(0,Math.ceil(HOLD-(S.t-S.last)));o.textContent='Hold: '+left+' min left';o.className='pill hold'}
+    else{o.textContent='Empty';o.className='pill off'}
+    var e=energy();$('es').textContent=e[0].toFixed(2);$('eb').textContent=e[1].toFixed(2);
+    $('esv').textContent=(e[1]>0?Math.max(0,Math.round(100*(e[1]-e[0])/e[1])):0)+' %';
+    // visuals
+    sun.setAttribute('opacity',clamp(l/900,0,1)*0.9);
+    var total=l+(p/100)*TARGET;dark.setAttribute('opacity',(0.62*(1-clamp(total/TARGET,0,1))).toFixed(3));
+    leds.forEach(function(r){var k=p/100;r.setAttribute('fill',p>0?'rgb('+Math.round(58+197*k)+','+Math.round(67+160*k)+','+Math.round(88-10*k)+')':'#3A4358')});
+    halos.forEach(function(h){h.setAttribute('opacity',(p/100*0.85).toFixed(3))});
+    ppl.forEach(function(c){c.setAttribute('opacity',pres?1:0)});
+    pirRing.setAttribute('opacity',pres?1:0);
+    bhTxt.textContent=Math.round(l)+' lx';bhTxt.setAttribute('fill',total>200?'#0F1E3D':'#fff');
+    if(cur){cur.setAttribute('x1',cx(S.t));cur.setAttribute('x2',cx(S.t))}
+  }
+  // ---- loop
+  var lastTs=null;
+  function tick(ts){
+    if(S.playing){
+      if(lastTs===null)lastTs=ts;var dt=(ts-lastTs)/1000;lastTs=ts;
+      var from=Math.floor(S.t);S.t=Math.min(T1,S.t+dt*S.speed);
+      for(var m=from;m<=Math.floor(S.t);m++){if(motion(m))S.last=m}
+      if(S.t>=T1){S.playing=false;$('play').textContent='▶ Play day'}
+      render();
+    }else lastTs=null;
+    requestAnimationFrame(tick);
+  }
+  // ---- controls / API
+  function setTime(m){S.t=clamp(m,T0,T1);rescan();render()}
+  function setSky(v){S.sky=v;[].forEach.call($('sky').children,function(b){b.classList.toggle('act',b.dataset.v===v)});drawChart();render()}
+  function setMode(v){S.mode=v;[].forEach.call($('mode').children,function(b){b.classList.toggle('act',b.dataset.v===v)});rescan();drawChart();render()}
+  function play(sp){if(sp)S.speed=sp;if(S.t>=T1){S.t=T0;rescan()}S.playing=true;$('play').textContent='❚❚ Pause'}
+  function pause(){S.playing=false;$('play').textContent='▶ Play day'}
+  function caption(t){var c=$('cap');if(t){c.textContent=t;c.style.display='block'}else c.style.display='none'}
+  $('play').onclick=function(){S.playing?pause():play(+$('speed').value)};
+  $('time').oninput=function(){pause();setTime(+this.value)};
+  $('speed').onchange=function(){S.speed=+this.value};
+  [].forEach.call($('sky').children,function(b){b.onclick=function(){setSky(b.dataset.v)}});
+  [].forEach.call($('mode').children,function(b){b.onclick=function(){setMode(b.dataset.v)}});
+  window.demo={setTime:setTime,setSky:setSky,setMode:setMode,play:play,pause:pause,caption:caption,state:S,
+    pct:function(){var l=lux(S.t,S.sky);return pctFor(l,(S.t-S.last)<HOLD)}};
+  drawChart();render();requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

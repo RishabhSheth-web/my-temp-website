@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smart Classroom - 3D Virtual Prototype</title>
+<style>
+  :root{--panel:#fcfcfbf2;--ink:#0b0b0b;--ink2:#52514e;--line:#e6e5e1;--blue:#2a78d6;--orange:#eb6834;--aqua:#1baf7a}
+  html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#111}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block}
+  .box{position:fixed;background:var(--panel);color:var(--ink);border-radius:10px;padding:12px 14px;box-shadow:0 2px 14px #0003;font-size:13px}
+  #controls{left:12px;top:12px;width:270px}
+  #hud{right:12px;top:12px;width:300px;max-height:calc(100% - 24px);overflow:auto}
+  h1{font-size:15px;margin:0 0 8px}
+  h2{font-size:12px;margin:10px 0 4px;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em}
+  label{display:block;margin:8px 0 2px;color:var(--ink2)}
+  input[type=range]{width:100%}
+  select,button{font:inherit;padding:5px 8px;border-radius:6px;border:1px solid var(--line);background:#fff;width:100%}
+  button{cursor:pointer;margin-top:8px}
+  table{width:100%;border-collapse:collapse}
+  td{padding:2px 0;border-bottom:1px solid var(--line)}
+  td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
+  .hint{color:var(--ink2);font-size:11px;margin-top:8px}
+  @media (max-width:760px){#hud{top:auto;bottom:12px;width:auto;left:12px;max-height:40%}#controls{width:auto;right:12px}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="controls" class="box">
+  <h1>Smart Classroom - virtual prototype</h1>
+  <label>Time of day: <b id="tlabel">11:00</b></label>
+  <input id="time" type="range" min="0" max="24" step="0.05" value="11">
+  <label>Day of year: <b id="dlabel">80</b></label>
+  <input id="doy" type="range" min="1" max="365" step="1" value="80">
+  <label>Weather</label>
+  <select id="weather">
+    <option value="1">Clear</option>
+    <option value="0.65">Partly cloudy</option>
+    <option value="0.25">Overcast</option>
+  </select>
+  <label>Occupancy</label>
+  <select id="occ">
+    <option value="auto">Class timetable (09-13, 14-17)</option>
+    <option value="on">Force occupied</option>
+    <option value="off">Force empty</option>
+  </select>
+  <button id="play">Play day</button>
+  <div class="hint">Drag to orbit, scroll to zoom, right-drag to pan. Roof: dual-axis tracker. Ceiling: 12 LED panels and 6 fans. Walls are transparent so you can see the sensors.</div>
+</div>
+
+<div id="hud" class="box">
+  <h2>Environment</h2>
+  <table>
+    <tr><td>Sun elevation / azimuth</td><td id="h_sun"></td></tr>
+    <tr><td>Daylight at desk (BH1750)</td><td id="h_lux"></td></tr>
+    <tr><td>Occupancy (PIR)</td><td id="h_pir"></td></tr>
+    <tr><td>Average temperature (4 x TMP36)</td><td id="h_t"></td></tr>
+  </table>
+  <h2>Controller output</h2>
+  <table>
+    <tr><td>LED duty</td><td id="h_duty"></td></tr>
+    <tr><td>Fan speed</td><td id="h_fan"></td></tr>
+    <tr><td>Tracker tilt / pan</td><td id="h_trk"></td></tr>
+  </table>
+  <h2>Power</h2>
+  <table>
+    <tr><td><span class="sw" style="background:var(--orange)"></span>Baseline load</td><td id="h_base"></td></tr>
+    <tr><td><span class="sw" style="background:var(--blue)"></span>Smart load</td><td id="h_smart"></td></tr>
+    <tr><td><span class="sw" style="background:var(--aqua)"></span>Solar (tracker)</td><td id="h_pvt"></td></tr>
+    <tr><td><span class="sw" style="background:#8a8984"></span>Solar (fixed panel)</td><td id="h_pvf"></td></tr>
+  </table>
+  <h2>Virtual INA219 (prototype bus, 1:50)</h2>
+  <table>
+    <tr><td>Bus voltage</td><td id="h_v"></td></tr>
+    <tr><td>Current</td><td id="h_i"></td></tr>
+    <tr><td>Power</td><td id="h_p"></td></tr>
+  </table>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+"use strict";
+// ---------------------------------------------------------------- model (mirrors model.py, noise-free)
+const CFG = {lat:11.32, nLights:12, lightW:18, nFans:6, fanW:60, fanExp:3, standbyW:6, targetLux:500,
+  daylightFactor:0.01, minDuty:0.10, tOn:26, tFull:32, fanMin:0.30, baseStart:8, baseEnd:18,
+  kwp:0.5, tilt:11, azPanel:180, tc:-0.004, parasitic:5, minElev:10, persons:40, scale:1/50, busV:12};
+const DEG = Math.PI/180;
+
+function sunPos(doy, h, latDeg){
+  const lat = latDeg*DEG, decl = 23.45*DEG*Math.sin(2*Math.PI*(284+doy)/365), om = 15*DEG*(h-12);
+  const sinEl = Math.sin(lat)*Math.sin(decl)+Math.cos(lat)*Math.cos(decl)*Math.cos(om);
+  const el = Math.asin(Math.max(-1,Math.min(1,sinEl)));
+  const ce = Math.max(Math.cos(el),1e-6);
+  const sa = -Math.cos(decl)*Math.sin(om)/ce;
+  const ca = (Math.sin(decl)*Math.cos(lat)-Math.cos(decl)*Math.sin(lat)*Math.cos(om))/ce;
+  let az = Math.atan2(sa,ca); if(az<0) az += 2*Math.PI;
+  return {el, az};
+}
+function clearSky(el){
+  const s = Math.sin(el); if(s<=0.02) return {dni:0,dhi:0};
+  const dni = 1353*Math.pow(0.7, Math.pow(1/s,0.678));
+  return {dni, dhi: 0.1*dni*s+25*s};
+}
+function isClassTime(h){ return (h>=9&&h<13)||(h>=14&&h<17); }
+
+function compute(h, doy, k, occMode){
+  const {el, az} = sunPos(doy, h, CFG.lat);
+  const cs = clearSky(el);
+  const dni = cs.dni*k*k, dhi = cs.dhi*(1+(1-k)*1.5);
+  const ghi = dni*Math.sin(Math.max(el,0))+dhi;
+  const lux = el>0 ? ghi*110*CFG.daylightFactor : 0;
+
+  const occ = occMode==="on" ? true : occMode==="off" ? false : isClassTime(h);
+  const persons = occ ? CFG.persons : 0;
+
+  const tOut = 28.5+4.5*Math.sin(2*Math.PI*(h-9)/24)-2.5*(1-k);
+  const tRoom = 0.65*tOut+0.35*27+0.012*persons+0.0015*ghi;
+  const offs = [0.9,0.1,0,-0.4], win=[1.5,0.2,0.3,0];
+  const temps = offs.map((o,i)=> tRoom+o+ghi/1000*win[i]);
+  const tAvg = temps.reduce((a,b)=>a+b,0)/4;
+
+  // lighting
+  const need = Math.max(CFG.targetLux-lux,0)/CFG.targetLux;
+  let duty = need>0.02 ? Math.max(need,CFG.minDuty) : 0;
+  if(!occ) duty = 0;
+  // fans
+  let sp = Math.min(Math.max((tAvg-CFG.tOn)/(CFG.tFull-CFG.tOn),0),1);
+  sp = sp>0 ? CFG.fanMin+(1-CFG.fanMin)*sp : 0;
+  if(!occ) sp = 0;
+
+  const baseOn = h>=CFG.baseStart && h<CFG.baseEnd;
+  const baseW = baseOn ? CFG.nLights*CFG.lightW + CFG.nFans*CFG.fanW : 0;
+  const smartW = CFG.nLights*CFG.lightW*duty + CFG.nFans*CFG.fanW*Math.pow(sp,CFG.fanExp) + CFG.standbyW;
+
+  // solar
+  const tracking = el > CFG.minElev*DEG;
+  const sv = [Math.cos(el)*Math.sin(az), Math.cos(el)*Math.cos(az), Math.sin(el)];
+  const b = CFG.tilt*DEG, a = CFG.azPanel*DEG;
+  const nf = [Math.sin(b)*Math.sin(a), Math.sin(b)*Math.cos(a), Math.cos(b)];
+  const cosInc = Math.max(0, sv[0]*nf[0]+sv[1]*nf[1]+sv[2]*nf[2]);
+  const poaF = dni*cosInc + dhi*(1+Math.cos(b))/2 + 0.2*ghi*(1-Math.cos(b))/2;
+  const tt = Math.PI/2-Math.max(el,0);
+  const poaT = dni*0.99 + dhi*(1+Math.cos(tt))/2 + 0.2*ghi*(1-Math.cos(tt))/2;
+  const pv = poa => Math.max(0, CFG.kwp*poa*(1+CFG.tc*(tOut+0.03*poa-25)));
+  const pvF = tracking ? pv(poaF) : 0;
+  const pvT = tracking ? Math.max(0, pv(poaT)-CFG.parasitic) : 0;
+
+  // INA219 on the scaled prototype bus
+  const pP = smartW*CFG.scale, v = CFG.busV-0.05*(pP/CFG.busV), i = pP/v;
+  return {el, az, lux, occ, persons, temps, tAvg, duty, sp, baseW, smartW, pvF, pvT, tracking, ghi, k,
+          ina:{v, i, p:v*i}};
+}
+
+// ---------------------------------------------------------------- three.js scene
+const canvas = document.getElementById("c");
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
+camera.position.set(11, 8, 12);
+const controls = new THREE.OrbitControls(camera, canvas);
+controls.target.set(0, 2, 0); controls.maxPolarAngle = Math.PI*0.49; controls.update();
+
+const W=8, D=6, H=3;               // room: 8 m (x) x 6 m (z), 3 m high. South wall (+z) has the windows.
+const hemi = new THREE.HemisphereLight(0xffffff, 0x888899, 0.5); scene.add(hemi);
+const sunLight = new THREE.DirectionalLight(0xffffff, 1); sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(2048,2048);
+Object.assign(sunLight.shadow.camera, {left:-14,right:14,top:14,bottom:-14,near:1,far:80});
+scene.add(sunLight, sunLight.target);
+
+function mat(c, o={}){ return new THREE.MeshStandardMaterial(Object.assign({color:c, roughness:0.8}, o)); }
+function box(w,h,d,m){ const x = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), m); x.castShadow = true; x.receiveShadow = true; return x; }
+function label(text, scale=1){
+  const c = document.createElement("canvas"); c.width = 512; c.height = 96;
+  const g = c.getContext("2d"); g.fillStyle = "#fcfcfbe6"; g.fillRect(0,0,512,96);
+  g.fillStyle = "#0b0b0b"; g.font = "bold 40px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(text, 256, 50);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c), depthTest:false}));
+  s.scale.set(2.2*scale, 0.41*scale, 1); s.renderOrder = 10; return s;
+}
+
+// ground + floor
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(80,80), mat(0x4a6f40)); ground.rotation.x = -Math.PI/2; ground.position.y = -0.02; ground.receiveShadow = true; scene.add(ground);
+const floor = box(W,0.1,D, mat(0xd9d4c7)); floor.position.y = 0.05; scene.add(floor);
+
+// walls (translucent so the interior stays visible)
+const wallMat = mat(0xf1efe8, {transparent:true, opacity:0.28, side:THREE.DoubleSide});
+const wN = box(W,H,0.1,wallMat); wN.position.set(0,H/2,-D/2); scene.add(wN);
+const wE = box(0.1,H,D,wallMat); wE.position.set(W/2,H/2,0); scene.add(wE);
+const wW = box(0.1,H,D,wallMat); wW.position.set(-W/2,H/2,0); scene.add(wW);
+// south wall with 3 window openings (glass)
+for(const x of [-2.6,0,2.6]){
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(1.8,1.3), new THREE.MeshStandardMaterial({color:0x9fd0ff,transparent:true,opacity:0.35,side:THREE.DoubleSide}));
+  glass.position.set(x,1.7,D/2); scene.add(glass);
+}
+const wS = box(W,H,0.1,mat(0xf1efe8,{transparent:true,opacity:0.18,side:THREE.DoubleSide})); wS.position.set(0,H/2,D/2); scene.add(wS);
+const roof = box(W+0.4,0.15,D+0.4, mat(0xb8b4a8,{transparent:true,opacity:0.3})); roof.position.y = H+0.08; scene.add(roof);
+
+// desks + students
+const desks = [], people = [];
+for(let r=0;r<3;r++) for(let c=0;c<4;c++){
+  const x = -2.7+c*1.8, z = -1.4+r*1.5;
+  const desk = box(1.2,0.06,0.6,mat(0x8a6b4a)); desk.position.set(x,0.75,z); scene.add(desk);
+  for(const dx of [-0.55,0.55]) for(const dz of [-0.25,0.25]){ const l = box(0.05,0.7,0.05,mat(0x555555)); l.position.set(x+dx,0.4,z+dz); scene.add(l); }
+  const p = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.2,0.55,12), mat(0x3b5b8c)); body.position.y = 0.75; body.castShadow = true;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.13,14,14), mat(0xe0b894)); head.position.y = 1.18; head.castShadow = true;
+  p.add(body, head); p.position.set(x,0,z+0.65); p.visible = false; scene.add(p); people.push(p);
+}
+const board = box(3.2,1.1,0.05,mat(0x1f3b2f)); board.position.set(0,1.7,-D/2+0.08); scene.add(board);
+
+// LED panels on the ceiling (emissive; brightness follows duty)
+const ledMats = [], ledLights = [];
+for(let i=0;i<12;i++){
+  const m = new THREE.MeshStandardMaterial({color:0x777777, emissive:0xfff2c8, emissiveIntensity:0});
+  const p = box(0.9,0.04,0.45,m);
+  p.position.set(-2.7+(i%4)*1.8, H-0.04, -1.4+Math.floor(i/4)*1.5+0.45);
+  p.castShadow = false; scene.add(p); ledMats.push(m);
+}
+for(const [x,z] of [[-2,-1],[2,-1],[-2,1.5],[2,1.5]]){
+  const l = new THREE.PointLight(0xfff2c8, 0, 9, 2); l.position.set(x,H-0.3,z); scene.add(l); ledLights.push(l);
+}
+
+// ceiling fans
+const fans = [];
+for(let i=0;i<6;i++){
+  const g = new THREE.Group(); g.position.set(-2.4+(i%3)*2.4, H-0.35, -1.0+Math.floor(i/3)*2.4);
+  const rod = box(0.04,0.3,0.04,mat(0x333333)); rod.position.y = 0.2; g.add(rod);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,0.08,16), mat(0x222222)); g.add(hub);
+  const blades = new THREE.Group();
+  for(let b=0;b<3;b++){ const bl = box(0.7,0.015,0.12,mat(0xcfcfcf)); bl.position.x = 0.45; const pv = new THREE.Group(); pv.rotation.y = b*2*Math.PI/3; pv.add(bl); blades.add(pv); }
+  g.add(blades); scene.add(g); fans.push(blades);
+}
+
+// sensors: 4 x TMP36, PIR, BH1750
+const tmpSpheres = [];
+const tmpPos = [[-3.5,1.6,2.3],[3.4,1.6,-2.3],[0,2.2,0],[-3.4,1.6,-2.3]];
+const tmpNames = ["TMP36-1 window","TMP36-2 door","TMP36-3 centre","TMP36-4 back"];
+tmpPos.forEach((p,i)=>{
+  const s = new THREE.Mesh(new THREE.SphereGeometry(0.11,16,16), new THREE.MeshStandardMaterial({color:0x2a78d6,emissive:0x111111}));
+  s.position.set(...p); scene.add(s); tmpSpheres.push(s);
+  const l = label(tmpNames[i],0.55); l.position.set(p[0],p[1]+0.35,p[2]); scene.add(l);
+});
+const pir = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.16,0.14), mat(0xffffff)); pir.position.set(3.85,2.5,-2.9); scene.add(pir);
+const pirLed = new THREE.Mesh(new THREE.SphereGeometry(0.05,12,12), new THREE.MeshStandardMaterial({color:0x444444,emissive:0x000000})); pirLed.position.set(3.85,2.5,-2.8); scene.add(pirLed);
+{ const l = label("PIR sensor",0.55); l.position.set(3.4,2.95,-2.8); scene.add(l); }
+const bh = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.05,0.2), mat(0x1b6bd0)); bh.position.set(-2.7,0.8,0.0); scene.add(bh);
+{ const l = label("BH1750 (desk)",0.55); l.position.set(-2.7,1.3,0.0); scene.add(l); }
+const esp = box(0.45,0.3,0.12,mat(0x1d1d1d)); esp.position.set(-3.9,1.5,-1.0); scene.add(esp);
+{ const l = label("ESP32 + INA219",0.55); l.position.set(-3.5,2.0,-1.0); scene.add(l); }
+
+// roof-mounted dual-axis tracker
+const mast = box(0.12,1.0,0.12,mat(0x555555)); mast.position.set(0,H+0.65,0); scene.add(mast);
+const panAxis = new THREE.Group(); panAxis.position.set(0,H+1.2,0); scene.add(panAxis);     // servo 1: pan (about Y)
+const tiltAxis = new THREE.Group(); panAxis.add(tiltAxis);                                    // servo 2: tilt (about X)
+const panel = box(1.6,0.05,1.1,new THREE.MeshStandardMaterial({color:0x14306b,metalness:0.4,roughness:0.35})); tiltAxis.add(panel);
+for(let i=1;i<4;i++){ const ln = box(0.01,0.052,1.1,mat(0xaab4d0)); ln.position.x = -0.8+i*0.4; tiltAxis.add(ln); }
+const ldrs = [[-0.7,0.04,-0.45],[0.7,0.04,-0.45],[-0.7,0.04,0.45],[0.7,0.04,0.45]];
+ldrs.forEach(p=>{ const l = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.04,12), mat(0xd9a521)); l.position.set(...p); tiltAxis.add(l); });
+{ const l = label("Dual-axis tracker + 4 LDR",0.7); l.position.set(0,H+2.4,0); scene.add(l); }
+// sun marker
+const sunBall = new THREE.Mesh(new THREE.SphereGeometry(0.6,20,20), new THREE.MeshBasicMaterial({color:0xffe28a})); scene.add(sunBall);
+
+// ---------------------------------------------------------------- UI wiring
+const el = id => document.getElementById(id);
+const ui = {time:el("time"), doy:el("doy"), weather:el("weather"), occ:el("occ"), play:el("play")};
+let playing = false, last = performance.now();
+const fmtH = h => { const hh = Math.floor(h), mm = Math.floor((h-hh)*60); return String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0"); };
+const skyDay = new THREE.Color(0x9ec9ff), skyNight = new THREE.Color(0x0b1026), skyGrey = new THREE.Color(0x8c97a3);
+let state = null, fanAngle = 0;
+
+function updateScene(){
+  const h = parseFloat(ui.time.value), doy = parseInt(ui.doy.value), k = parseFloat(ui.weather.value);
+  el("tlabel").textContent = fmtH(h); el("dlabel").textContent = doy;
+  const s = state = compute(h, doy, k, ui.occ.value);
+
+  // sun & sky
+  const sv = new THREE.Vector3(Math.cos(s.el)*Math.sin(s.az), Math.sin(s.el), -Math.cos(s.el)*Math.cos(s.az));
+  sunBall.position.copy(sv).multiplyScalar(30); sunBall.visible = s.el > 0;
+  sunLight.position.copy(sv).multiplyScalar(40); sunLight.target.position.set(0,0,0);
+  const up = Math.max(0, Math.min(1, Math.sin(s.el)*3));
+  sunLight.intensity = s.el>0 ? 1.4*up*(0.25+0.75*Math.pow(s.k,2)) : 0;
+  hemi.intensity = 0.12 + 0.55*up*(0.5+0.5*s.k);
+  const sky = skyNight.clone().lerp(skyDay.clone().lerp(skyGrey,(1-s.k)*0.8), up);
+  scene.background = sky; scene.fog = new THREE.Fog(sky, 60, 140);
+
+  // tracker follows the sun (parks flat when below the tracking limit)
+  if(s.tracking){ panAxis.rotation.y = Math.atan2(sv.x, sv.z); tiltAxis.rotation.x = Math.PI/2 - s.el; }
+  else { tiltAxis.rotation.x = 0; }
+
+  // lights
+  ledMats.forEach(m => m.emissiveIntensity = s.duty*1.6);
+  ledLights.forEach(l => l.intensity = s.duty*0.9);
+
+  // sensors & occupants
+  s.temps.forEach((t,i)=>{
+    const f = Math.max(0,Math.min(1,(t-24)/(36-24)));
+    const c = new THREE.Color().setHSL(0.62*(1-f), 0.85, 0.5);
+    tmpSpheres[i].material.color.copy(c); tmpSpheres[i].material.emissive.copy(c).multiplyScalar(0.35);
+  });
+  pirLed.material.emissive.set(s.occ ? 0x00ff55 : 0x000000); pirLed.material.color.set(s.occ ? 0x00ff55 : 0x444444);
+  const nShow = s.occ ? 12 : 0; people.forEach((p,i)=> p.visible = i < nShow);
+
+  // HUD
+  const w = x => x.toFixed(0)+" W";
+  el("h_sun").textContent = (s.el/DEG).toFixed(0)+"° / "+(s.az/DEG).toFixed(0)+"°";
+  el("h_lux").textContent = s.lux.toFixed(0)+" lx";
+  el("h_pir").textContent = s.occ ? "Occupied" : "Empty";
+  el("h_t").textContent = s.tAvg.toFixed(1)+" °C";
+  el("h_duty").textContent = (s.duty*100).toFixed(0)+" %";
+  el("h_fan").textContent = (s.sp*100).toFixed(0)+" %";
+  el("h_trk").textContent = s.tracking ? ((90-s.el/DEG).toFixed(0)+"° / "+(s.az/DEG).toFixed(0)+"°") : "parked";
+  el("h_base").textContent = w(s.baseW); el("h_smart").textContent = w(s.smartW);
+  el("h_pvt").textContent = w(s.pvT); el("h_pvf").textContent = w(s.pvF);
+  el("h_v").textContent = s.ina.v.toFixed(3)+" V"; el("h_i").textContent = (s.ina.i*1000).toFixed(0)+" mA"; el("h_p").textContent = s.ina.p.toFixed(2)+" W";
+}
+["input","change"].forEach(ev => Object.values(ui).forEach(c => c.addEventListener(ev, e => { if(c!==ui.play) updateScene(); })));
+ui.play.addEventListener("click", () => { playing = !playing; ui.play.textContent = playing ? "Pause" : "Play day"; });
+
+function resize(){ const w = innerWidth, h = innerHeight; renderer.setSize(w,h,false); camera.aspect = w/h; camera.updateProjectionMatrix(); }
+addEventListener("resize", resize); resize();
+
+function frame(now){
+  const dt = Math.min(0.1,(now-last)/1000); last = now;
+  if(playing){ let t = parseFloat(ui.time.value)+dt*1.2; if(t>=24) t -= 24; ui.time.value = t; updateScene(); }
+  if(state){ fanAngle += dt*state.sp*14; fans.forEach((b,i)=> b.rotation.y = fanAngle*(i%2?1:-1)); }
+  controls.update(); renderer.render(scene, camera); requestAnimationFrame(frame);
+}
+updateScene(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
